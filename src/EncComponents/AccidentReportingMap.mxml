@@ -1,0 +1,883 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:Group
+	xmlns:fx="http://ns.adobe.com/mxml/2009"
+	xmlns:s="library://ns.adobe.com/flex/spark"
+	xmlns:mx="library://ns.adobe.com/flex/mx" 
+	xmlns:text="flash.text.*"
+	xmlns:esri="http://www.esri.com/2008/ags" 
+	xmlns:EncComponents="EncComponents.*"
+	creationComplete="init()" width="100%" height="100%"
+	initialize="group1_initializeHandler(event)">
+	<s:layout> 
+		<s:BasicLayout /> 
+	</s:layout>
+
+
+	<fx:Script>
+		<![CDATA[
+			import com.esri.ags.FeatureSet;
+			import com.esri.ags.Graphic;
+			import com.esri.ags.SpatialReference;
+			import com.esri.ags.events.DrawEvent;
+			import com.esri.ags.events.EditEvent;
+			import com.esri.ags.events.ExtentEvent;
+			import com.esri.ags.events.FeatureLayerEvent;
+			import com.esri.ags.events.GeometryServiceEvent;
+			import com.esri.ags.events.MapMouseEvent;
+			import com.esri.ags.events.QueryEvent;
+			import com.esri.ags.geometry.Extent;
+			import com.esri.ags.geometry.Geometry;
+			import com.esri.ags.geometry.MapPoint;
+			import com.esri.ags.geometry.Polyline;
+			import com.esri.ags.layers.GraphicsLayer;
+			import com.esri.ags.layers.Layer;
+			import com.esri.ags.tasks.supportClasses.AddressCandidate;
+			import com.esri.ags.utils.WebMercatorUtil;
+			
+			import events.SlidingPanelEvent;
+			
+			import mx.collections.ArrayCollection;
+			import mx.controls.Alert;
+			import mx.controls.Button;
+			import mx.controls.ToggleButtonBar;
+			import mx.effects.*;
+			import mx.events.FlexEvent;
+			import mx.events.ItemClickEvent;
+			import mx.rpc.AsyncResponder;
+			import mx.rpc.Fault;
+			import mx.rpc.events.FaultEvent;
+			
+			import spark.events.IndexChangeEvent;
+
+
+		
+	[Bindable]
+	private var aLayersTOC:ArrayCollection = new ArrayCollection;
+	
+	[Bindable]
+	private var zoneAttributes:ArrayCollection = new ArrayCollection;
+	
+	[Bindable]
+	private var fabricAttributes:ArrayCollection = new ArrayCollection;
+
+	[Embed('/assets/icons/i_draw_line.png')]
+	[Bindable]
+	public var icon1:Class;
+
+	[Bindable]
+	private var imageLayer:Layer;
+	
+	[Bindable]
+	private var reliefLayer:Layer;
+	
+	[Bindable]
+	private var basemapLayer:Layer;
+
+	[Bindable]
+	private var basemapPlusLayer:Layer;
+			
+			[Bindable]
+			private var _configXML:XML;
+			
+			[Bindable]
+			private var _geometryService:GeometryService;
+			
+			[Bindable]
+			private var drawlength:Number;
+			
+			[Bindable]
+			private var drawGraphic:Graphic
+			
+			[Bindable]
+			private var drawStart:MapPoint
+			
+			[Bindable]
+			public var myTok:String;
+			
+
+			
+	private var  URLparams:Object = getURLParameters();
+	private var APN:String;
+	private var blnInitCount:Boolean = false;
+
+			
+	private function init():void
+	{
+		
+		//this.setChildIndex(cnvMap, 0);
+		this.setElementIndex(appMain, 1);
+		this.setElementIndex(mapcontrol1, 2);
+		//this.setChildIndex(Toc1, 3);
+		
+		aLayersTOC.removeAll();
+		
+		reliefLayer = map.layers[0];
+		imageLayer = map.layers[1];
+		
+		basemapLayer = map.layers[2];
+		basemapPlusLayer = map.layers[3];
+		
+
+		aLayersTOC.addItem(map.layers[2]);
+		aLayersTOC.addItem(map.layers[3]);
+		
+		var i:int;
+		zoneAttributes.removeAll()
+		for (i=0; i < 8; i++)
+		{
+			zoneAttributes.addItem({Category: "", Value: ""})
+		} 
+
+		
+		if (URLparams ["start"])
+		{
+			
+			if (URLparams ["start"].toString() == "geocode")
+			{
+				
+				
+				var addr:String=(URLparams ["search"].toString());
+				if (URLparams ["srchType"])
+				{
+					var srchtype:String=(URLparams ["srchType"].toString());
+					if (srchtype == "1")
+					{
+						doSearchAPN(addr)
+					}
+					else
+					{
+						doSearchAddress(addr)
+					}
+				}
+			}
+			else if (URLparams ["start"].toString() == "extent")
+			{
+				var extent:Extent = new Extent(URLparams ['xmin'].toString(),URLparams ['ymin'].toString(),URLparams ['xmax'].toString(),URLparams ['ymax'].toString())
+				map.extent = extent
+			
+			}
+			
+		}
+
+		
+		if (URLparams ['X'])
+		{
+			var mapPoint:MapPoint = new MapPoint(URLparams ['X'].toString(),URLparams ['Y'].toString())
+			
+			var mapEvent:MapMouseEvent = new MapMouseEvent("mapClick", map, mapPoint)
+			onMapClicked(mapEvent)
+			
+		}
+		
+		
+	}
+
+
+	private function navitemClickHandler(event:ItemClickEvent):void
+	{
+		tbbTools.selectedIndex = -1;
+		draw.deactivate();
+		map.removeEventListener(MouseEvent.MOUSE_MOVE,onMoseGraphicMove);
+			
+ 		switch (event.item.data)
+		{                    
+			case "Zoom In":                    
+			{                        
+				navToolbar.activate(NavigationTool.ZOOM_IN);                       
+				break;                    
+			}                    
+			case "Zoom Out":                    
+			{                        
+				navToolbar.activate(NavigationTool.ZOOM_OUT);                        
+				break;                    
+			}                    
+			case "Identify":
+			{
+				navToolbar.deactivate();
+				//map.addEventListener(MapMouseEvent.MAP_CLICK,onMapClicked);
+				map.panEnabled=true;
+				map.openHandCursorVisible=false;
+				//tbb.selectedIndex = -1
+				break;
+			}                
+		}             
+	}
+	
+
+	
+	private function onMapClicked(event:MapMouseEvent):void
+	{
+		
+	
+	}
+	
+	private function doQuery(queryPoint:MapPoint):void
+	{
+			
+/*			graphicsLayer.clear();
+ 			if (zoneAttributes.length >0)
+			{
+				zoneAttributes.removeAll();
+				
+			} */
+			
+			query.geometry= queryPoint;
+			queryParcels.execute(query);
+						
+
+	}
+	
+	private function onQueryParcelComplete(event:QueryEvent):void
+	{
+        var fset:FeatureSet = event.featureSet; 
+        
+           
+        for each (var graphic:Graphic in fset.features)                
+        {
+        	graphic.symbol = fillSymbol
+        	graphic.visible = true
+   
+				if (!spMain.IsOpen)
+				{
+					spMain.open()
+				}
+				
+               
+  		}
+	}
+	
+	private function onZoningFault(error:Object,faultString:String):void
+	{
+		Alert.show(error.toString())
+	}
+	
+			
+	
+	private function onBookMarkChange(event:Event):void
+    {
+    	var ext:Extent = new Extent(event.currentTarget.selectedItem.x1, event.currentTarget.selectedItem.y1, event.currentTarget.selectedItem.x2, event.currentTarget.selectedItem.y2);
+		map.extent = ext;
+    }
+    
+	 private function onExtentChanged(event:ExtentEvent):void
+	 {
+	 	
+	 }
+	 
+	 private function onNewSearch(event:Event):void
+	 {
+	 	var i:int = txtFindSite.text.indexOf(" ");
+		var j:int = txtFindSite.text.toUpperCase().search(" AND ");
+		var l:int = txtFindSite.text.search(" & ");
+		var m:int = txtFindSite.text.search(" @ ");
+		var n:int = txtFindSite.text.toUpperCase().search(" AT ");
+		if (j == -1 && l == -1 && m == -1 && n == -1 )
+		{
+			if (i > -1 && i < 10)
+			{
+				doSearchAddress(txtFindSite.text)
+			}
+			else
+			{
+				doSearchAPN(txtFindSite.text)
+			}
+		}
+		else
+		{
+			doSearchIntersection(txtFindSite.text)
+		}
+
+	 	
+	 }
+	 
+	private function doSearchAddress(addr:String):void
+	{
+		var addressObjectAddress:Object = 
+		{
+			Street: addr
+		}
+	
+		var myOutFieldsAddress:Array = ["HouseNum","Prefix Dir", "FacilityID"];
+		AddressLocator.addressToLocations(addressObjectAddress,myOutFieldsAddress,new AsyncResponder(onGeoResult, onGeoFault));
+	}
+	
+	private function doSearchAPN(addr:String):void
+	{
+		var addressObject:Object = 
+		{
+			SingleKey: addr
+		}
+	
+		var myOutFields:Array = ["Match_addr"];
+		APNLocator.addressToLocations(addressObject,myOutFields,new AsyncResponder(onGeoResult, onGeoFault));
+	}
+	private function doSearchIntersection(addr:String):void
+	{
+		var addressObjectAddress:Object = 
+			{
+				Street: addr
+			}
+		var myOutFields:Array = ["*"];
+		intersectionLocator.addressToLocations(addressObjectAddress,myOutFields,new AsyncResponder(onGeoResult, onGeoFault));
+	}
+	
+	private function onGeoResult(candidates:Array, token:Object = null):void 
+	{
+		if (candidates.length > 0)                    
+		{                        
+			var addressCandidate:AddressCandidate = candidates[0];
+			var point1:MapPoint = addressCandidate.location;
+			var coordGraphic:Graphic = new Graphic(point1,smsIdentify);
+			coordGraphic.geometry.spatialReference = new SpatialReference(2230)
+			var outSR:SpatialReference = new SpatialReference(102100);
+			geometry1.addEventListener(GeometryServiceEvent.PROJECT_COMPLETE,onProjectComplete);
+			geometry1.project([ point1 as Geometry],outSR);                        
+
+		}
+		else
+		{
+			Alert.show("Could not find this location. Please check the information you entered and try again")
+		}
+	}
+	
+	private function onGeoFault(info:Object, token:Object = null):void                
+	{                    
+		Alert.show("Failure: \n" + info.toString());                
+	}
+	
+	private function ontxtBoxClick(event:MouseEvent):void
+	{
+		txtFindSite.text = ""
+	}
+	
+	
+	
+	 public function getURLParameters():Object
+	 {
+	 	var result:URLVariables = new URLVariables();
+	 	try 
+	 	{                    
+	 		if (ExternalInterface.available)
+	 		{ 
+		 		// Use JavaScript to get the search string from the current 
+		 		//browser location. Use substring() to remove leading '?'. 
+		 		// See http://livedocs.adobe.com/flex/3/langref/flash/external/ExternalInterface.html 
+		 		var search:String = ExternalInterface.call("location.search.substring", 1);
+		 		if (search && search.length > 0)
+		 		{
+		 			result.decode(search);
+		 		}
+	 		}
+	 	}
+		catch (error:Error)
+		{
+			Alert.show(error.message);
+		}
+		return result;
+	 }
+	 
+        private function onProjectComplete(event:GeometryServiceEvent):void
+        {
+			geometry1.removeEventListener(GeometryServiceEvent.PROJECT_COMPLETE, onProjectComplete);
+			var pt:MapPoint = (event.result as Array)[0]as MapPoint;
+        	map.centerAt(pt);
+        	map.scale = 1128.497176;
+        	doQuery(pt);
+        }
+
+        private function onProjectFault(info:Object, token:Object = null):void
+        {
+        	Alert.show(info.toString());
+        }
+			
+
+			
+		private function onFault2(info:Object, token:Object = null):void
+		{
+			Alert.show(info.toString(), "Query Problem");
+		}
+		
+
+			
+		private function onLandRecordsFault(error:Object, clickGraphic:Graphic = null):void
+		{
+			Alert.show(String(error), "Identify Error");
+
+		}
+
+
+
+			protected function myEditor_clickHandler(event:MouseEvent):void
+			{
+				tbb.selectedIndex = -1;
+				draw.deactivate();
+			}
+			public function onDrawStart(event:DrawEvent):void
+			{
+				(event.currentTarget as DrawTool).graphicsLayer.clear();
+				//(event.graphic.geometry as Polyline).
+				drawGraphic = event.graphic;
+				map.addEventListener(MouseEvent.MOUSE_MOVE,onMoseGraphicMove)
+				drawStart = MapPoint(event.graphic.geometry);
+			}
+			private function onDrawProfile( event:DrawEvent ):void 
+			{
+				// Revert to navigation
+				//draw.deactivate();
+				map.removeEventListener(MouseEvent.MOUSE_MOVE,onMoseGraphicMove);
+			}
+			
+			private function onMoseGraphicMove(event:MouseEvent):void
+			{
+				if (drawGraphic.geometry){
+					//var drawnLine:Polyline =Polyline((event.target as Graphic).geometry)
+					var endPoint:MapPoint = map.toMapFromStage(event.stageX, event.stageY);
+					if (!drawStart)
+					{
+						var drawLine:Polyline = Polyline(drawGraphic.geometry);
+						//drawStart =drawLine.paths[0][0];
+						drawStart = WebMercatorUtil.webMercatorToGeographic(drawLine.paths[0][0]) as MapPoint;
+					}
+					var geoPoint:MapPoint = WebMercatorUtil.webMercatorToGeographic(endPoint) as MapPoint;
+					//drawlength = geoPoint.x
+					//drawlength = (Math.sqrt(Math.pow((endPoint.x - drawStart.x),2) + Math.pow((endPoint.y - drawStart.y),2))) / 1.2;
+					//drawlength = Math.acos(Math.cos((Math.PI/180)*(90-drawStart.y)) *Math.cos((Math.PI/180)*(90-endPoint.y)) +Math.sin((Math.PI/180)*(90-drawStart.y)) *Math.sin((Math.PI/180)*(90-endPoint.y)) *Math.cos((Math.PI/180)*(drawStart.x-endPoint.x))) *6371000
+					drawlength = (Math.acos(Math.cos((Math.PI/180)*(90-drawStart.y)) *Math.cos((Math.PI/180)*(90-geoPoint.y)) +Math.sin((Math.PI/180)*(90-drawStart.y)) *Math.sin((Math.PI/180)*(90-geoPoint.y)) *Math.cos((Math.PI/180)*(drawStart.x-geoPoint.x))) *6371000) * 3.2808
+
+				}
+				
+			}
+
+
+			
+			private function featureLayer_faultHandler(fault:Fault, token:Object = null):void
+			{
+				Alert.show(fault.faultString, "Fault");
+			}
+
+			protected function tbbTools_clickHandler(event:MouseEvent):void
+			{
+				tbb.selectedIndex = -1;
+			}
+			
+			
+			protected function controlbar1_clickHandler(event:MouseEvent):void
+			{
+				tbbTools.selectedIndex = -1;
+				map.removeEventListener(MouseEvent.MOUSE_MOVE,onMoseGraphicMove);
+			}
+
+
+			protected function draw_deactivateHandler(event:Event):void
+			{
+				tbbTools.selectedIndex = -1;
+				map.removeEventListener(MouseEvent.MOUSE_MOVE,onMoseGraphicMove);
+			}
+
+			
+
+			protected function spMain_annimationendedHandler(event:SlidingPanelEvent):void
+			{
+				
+				var screenpt:Point = map.toScreen(map.extent.center);
+				if ( ! spMain.IsOpen)
+				{
+					screenpt.x = screenpt.x - (map.width * .2);
+					var pt:MapPoint = map.toMap(screenpt);
+					map.centerAt(pt);
+					//map.scale = 1128.497176;
+				}
+				else
+				{
+					screenpt.x = screenpt.x + (map.width * .2);
+					pt = map.toMap(screenpt);
+					map.centerAt(pt);
+					//map.scale = 1128.497176;
+				}
+			}
+			protected function group1_initializeHandler(event:FlexEvent):void
+			{
+				myEditor.featureLayers=[ VGIpoints ]
+			}
+
+
+			protected function btnFindAccident_clickHandler(event:MouseEvent):void
+			{
+				var accidentQuey:Query = new Query();
+				accidentQuey.where = "CASENUM = '" + txtcasenumber.text + "'";
+				accidentQuey.returnGeometry = true;
+				VGIpoints.addEventListener(FeatureLayerEvent.SELECTION_COMPLETE,onAccidentResult);
+				VGIpoints.selectFeatures(accidentQuey, "new");
+				
+				
+				//VGIpoints.selectFeatures(accidentQuey,"new",new AsyncResponder(onAccidentResult,onAccidentResultFault));
+				function onAccidentResult(result:FeatureLayerEvent, token:Object = null):void
+				{
+					for each (var g:Graphic in result.features)
+					{
+						
+						map.centerAt(g.geometry as MapPoint)
+						map.level = 10;
+						
+					}
+					myEditor.enabled = true;
+					myEditor.editTool.activate(EditTool.MOVE,result.features);
+					myEditor.editTool.addEventListener(EditEvent.GRAPHICS_MOVE_STOP,editTool_graphicsMoveStopHandler,true);
+						
+					map.infoWindow.show(g.geometry as MapPoint);
+					
+					//myEditor.attributeInspector.visible = true;
+					
+			
+				}
+				function onAccidentResultFault(info:Object, token:Object = null):void
+				{
+					
+					Alert.show(info.toString(), "Seach for accident problem");
+				}
+			}
+
+			protected function editTool_graphicsMoveStopHandler(event:EditEvent):void
+			{
+				myEditor.editTool.removeEventListener(EditEvent.GRAPHICS_MOVE_STOP,editTool_graphicsMoveStopHandler);
+				FeatureLayer(event.graphics[0].graphicsLayer).applyEdits(null,event.graphics,null);
+			}
+
+		]]>
+	
+	</fx:Script>
+	
+	<fx:Declarations>
+		<fx:XML source="EncComponents\ElevationProfileWidget.xml" format="e4x" id="ElevationConfig" xmlns=""/>
+		<esri:DrawTool id="draw" map="{map}" graphicsLayer="{glProfileLine}" 
+					   drawStart="onDrawStart(event)" 
+					   drawEnd="onDrawProfile(event)"  deactivate="draw_deactivateHandler(event)"   />
+		<esri:EditTool id="editTool" map="{map}"
+					   graphicsMoveStop="editTool_graphicsMoveStopHandler(event)"/>
+		
+		<s:Fade duration="700" id="myF"/>
+		<s:Wipe direction="right" id="myR"/> 
+		<mx:Dissolve duration="700" id="myD"/>
+		<mx:SoundEffect id="myS" useDuration="false" loops="0" source="assets/icons/water-droplet-1.mp3"/>
+		<mx:Parallel id="myTwo">
+			<mx:children>
+				<mx:SoundEffect useDuration="false" loops="0" source="assets/icons/water-droplet-1.mp3"/>
+				<s:Wipe direction="right" duration="500"/>
+			</mx:children>
+		</mx:Parallel>
+		
+		<esri:NavigationTool id="navToolbar" map="{map}"/>
+		
+		<esri:Locator id="AddressLocator"
+					  url="https://coemapservices.encinitasca.gov/hypegis/rest/services/Unsecured/GISSQL_Address/GeocodeServer"/>
+		
+		<esri:Locator id="APNLocator"
+					  url="https://coemapservices.encinitasca.gov/hypegis/rest/services/Unsecured/GISSQL_APN/GeocodeServer"/>
+		<esri:Locator id="intersectionLocator"
+					  url="https://coemapservices.encinitasca.gov/hypegis/rest/services/Unsecured/GISSQL_Streets/GeocodeServer" />
+				
+		<!-- symbol to store geocode result so it can be reprojected -->
+		<esri:SimpleMarkerSymbol id="smsIdentify" style="diamond" color="0x00FF00" size="15"/>
+		
+		<esri:SimpleMarkerSymbol id="smsAddress" color="0x66CC00" size="19.3" alpha="1" style="diamond">
+			<esri:SimpleLineSymbol color="0x66CCCC" width="3" alpha="1" style="solid" />
+		</esri:SimpleMarkerSymbol>
+		
+		<esri:SimpleFillSymbol  id="fillSymbol" color="0xFF0033" alpha="0.25" style="null">
+			<esri:SimpleLineSymbol color="0x6600FF" width="4" alpha="1" style="dashdotdot" />
+		</esri:SimpleFillSymbol>
+		
+		<text:TextFormat id="tf"
+						 font="Arial"
+						 size="14"/>
+
+
+		<esri:IdentifyTask id="SiteProfiler_Identify" url="https://coemapservices.encinitasca.gov/hypegis/rest/services/SiteProfiler/MapServer" token="{myTok}"/>
+		
+		<esri:RelationshipQuery id="relatedPlanParcels"
+								outFields="[AddressFacilityID,BusinessName,BusinessPhone]"
+								relationshipId="1"
+								returnGeometry="true"
+								/>
+		<esri:GeometryService id="geometry1"
+							  concurrency="last"
+							  fault="onProjectFault(event)"
+							  url="https://coemapservices.encinitasca.gov/hypegis/rest/services/Utilities/Geometry/GeometryServer"/>
+		
+		<esri:QueryTask id="queryParcels"
+						showBusyCursor="true"						
+						url="https://coemapservices.encinitasca.gov/hypegis/rest/services/Unsecured/BasemapPlus/MapServer/8"
+						executeComplete="onQueryParcelComplete(event)" 
+						useAMF="false">		
+		</esri:QueryTask>
+		
+		<esri:QueryTask id="queryAddressesTask"
+						showBusyCursor="true"
+						url="https://coemapservices.encinitasca.gov/hypegis/rest/services/SiteProfiler/MapServer/0"
+						token="{myTok}"
+						useAMF="true">
+			
+		</esri:QueryTask>
+		
+		<esri:Query	id="query"
+					spatialRelationship="esriSpatialRelIntersects"
+					returnGeometry="true"
+					outSpatialReference="{map.spatialReference}"
+					 >
+			<esri:outFields>
+				<fx:String>gispub.GIS.tax_Parcel.APN</fx:String>
+				<fx:String>gispub.GIS.hdl_TaxRec.OwnerName1 </fx:String>
+				<fx:String>gispub.GIS.hdl_TaxRec.OwnerName2</fx:String>
+				<fx:String>gispub.GIS.hdl_TaxRec.SitusStreet</fx:String>
+				<fx:String>gispub.GIS.hdl_TaxRec.SitusCity </fx:String>
+				<fx:String>gispub.GIS.hdl_TaxRec.SitusState </fx:String>
+				<fx:String>gispub.GIS.hdl_TaxRec.SitusZip </fx:String>
+				<fx:String>gispub.GIS.hdl_TaxRec.MailToName </fx:String>
+				<fx:String>gispub.GIS.hdl_TaxRec.MailStreet </fx:String>
+				<fx:String>gispub.GIS.hdl_TaxRec.MailCity </fx:String>
+				<fx:String>gispub.GIS.hdl_TaxRec.MailZip </fx:String>
+				<fx:String>gispub.GIS.hdl_TaxRec.MailState </fx:String>
+				<fx:String>gispub.GIS.hdl_TaxRec.MailCountry </fx:String>
+				
+			</esri:outFields>
+		</esri:Query>
+		
+		<esri:Query id="queryFeatureLayerCaseNo"
+					outFields="*"/>
+		
+	
+	
+	</fx:Declarations>
+	
+
+	<mx:Image id="bgImage" alpha=".75" source="Styles/plain_bluesteel.JPG" maintainAspectRatio="false" width="100%" height="100%"/>
+	
+		
+<!--	<EncComponents:ApplicationJumpSpark id="Jump1" 	x="{hbxAddress.width + cboBookmarks.x + 150} " 
+		y="{bgImage.height - (hbxAddress.height)}" curmap="{map.extent}" toolTip="Click to switch between applications" />		
+	
+	-->
+
+	
+	
+<!--	<Components:toc id="Toc1" visible="true"  
+		aLayersTOC="{aLayersTOC}" 
+		x="{hbxAddress.width + cboBookmarks.x + 7}" 
+		y="{bgImage.height - (hbxAddress.height / 2)}" />	-->
+		
+	<EncComponents:OverViewComponent id="overviewMap" 
+		parentMap="{map}" 
+		y = "{header.height + 40}">
+		
+	</EncComponents:OverViewComponent>
+	
+	<EncComponents:BackroundTransparancyControl id = "mapcontrol1" 
+		 y = "{header.height + 5}"
+		 x= "{appMain.width - 150}"
+		 basemapLayer="{reliefLayer}"
+		 imageLayer="{imageLayer}"
+		 toolTip="Use the slider to toggle between shaded relief and imagery">
+	</EncComponents:BackroundTransparancyControl>
+	
+	<EncComponents:BasemapTransparancyControl id="basmapControl1" 
+		y="{header.height + 5}"
+		x= "{appMain.width - 300}"
+		BMLayer="{basemapLayer}"
+		BMPlusLayer="{basemapPlusLayer}" >
+		
+	</EncComponents:BasemapTransparancyControl>
+	
+	<EncComponents:SlidingPanel id="spMain" anchor="Left" width="485" y="{basmapControl1.y}" height="{hbMain.height}" startupState="closed" animateended="spMain_annimationendedHandler(event)" >
+		<s:Panel title="Edit Tools" width="100%"  height="100%" backgroundColor="#DDDDDD" fontSize="13"  borderColor="#D11B3D">
+			<s:VGroup id="commentsVBox" width="100%" height="100%"  paddingLeft="10" paddingRight="10" paddingBottom="10" >
+				<mx:Text  
+					width="100%" color="#000000"   
+					text="To add a new accident point, click on the yellow 'Add Accident' symbol below, and then click on the map. To modify an existing accident point, click on the 'Add Accident' symbol twice, then click on the existing accident on the map."/>
+				<mx:Spacer height="2"/>
+				<s:HGroup width="100%">
+					<esri:Editor id="myEditor"
+								 geometryService="{geometry1}"
+								 map="{map}"
+  								 toolbarVisible="true" 
+								 click="myEditor_clickHandler(event)" 
+								  width="50%" />
+
+					<s:VGroup width="50%" horizontalAlign="left" verticalAlign="middle" >	
+						
+						<s:Label text="{ElevationConfig.description}" lineBreak="toFit" width="150"  >
+						</s:Label>
+						
+						<s:ButtonBar click="tbbTools_clickHandler(event)" 
+									 id="tbbTools"  
+									 direction="ltr" 
+									 width="100%" height="100%"  
+									 skinClass="skins.IconButtonBarSkin"
+									 buttonMode="true" focusOut="tbbTools.selectedIndex = -1">
+							<s:dataProvider>
+								<s:ArrayCollection>
+									<fx:Object imageIcon="{icon1}" toolTip="Draw line (click, drag, release)"/>
+								</s:ArrayCollection>
+							</s:dataProvider>
+
+							<s:change>
+								<![CDATA[
+								switch ( (event as IndexChangeEvent).newIndex ) {
+								case 0:		
+									draw.activate( DrawTool.LINE, false ); 
+									break;
+								default:
+									draw.deactivate();
+									map.removeEventListener(MouseEvent.MOUSE_MOVE,onMoseGraphicMove);
+									break;
+								}
+								]]>
+							</s:change>
+
+						</s:ButtonBar>
+						<s:Label id="Distance" text="{'Resut:' + (drawlength.toString().substring(0, drawlength.toString().indexOf('.'))) + ' ft.'}"  fontSize="14" fontWeight="bold" />
+					</s:VGroup>
+				</s:HGroup>
+				<s:Label text="Search for an accident by its Case Number" fontWeight="bold"/>
+				<s:HGroup>
+					<s:TextInput id="txtcasenumber" width="200"  
+								 enter="{btnFindAccident.dispatchEvent(new MouseEvent(MouseEvent.CLICK))}" />
+					<s:Button id="btnFindAccident" click="btnFindAccident_clickHandler(event)" label="Find" />
+				</s:HGroup>
+			</s:VGroup>	
+		</s:Panel>
+
+	</EncComponents:SlidingPanel>
+
+		
+	<s:VGroup  width="100%" height="100%" id="appMain">
+	
+		<s:VGroup id="header" width="100%">
+			<mx:HBox horizontalGap="0" width="100%" id="hbHeader"> 
+				<mx:Image source="@Embed('Styles/Encinitas_2ndLevel_header.gif')"/>
+				<mx:Image width="100%" source="@Embed('Styles/bkgrd.gif')" maintainAspectRatio="false" id="imgHeader2"/>
+			</mx:HBox>
+	
+		</s:VGroup>	
+	
+	
+		<mx:HBox width="100%" height="100%" id="hbMain">
+			
+	
+			<mx:Canvas label="Parcel Map" width="100%" height="100%" id="cnvMap">
+	
+				<esri:Map id="map" logoVisible="false" rubberbandZoomEnabled="true"  mapClick="onMapClicked(event)" extentChange="onExtentChanged(event)" 
+					panEnabled="true" openHandCursorVisible="false" >
+	
+					<esri:lods>
+						<esri:LOD level="11" resolution="76.4370282850732" scale="288895.277144" />
+						<esri:LOD level="12" resolution="38.2185141425366" scale="144447.638572"/>
+						<esri:LOD level="13" resolution="19.1092570712683" scale="72223.819286"/>
+						<esri:LOD level="14" resolution="9.55462853563415" scale="36111.909643"/>
+						<esri:LOD level="15" resolution="6.3500127000254" scale="24000"/>
+						<esri:LOD level="16" resolution="4.77731426794937" scale="18055.954822"/>
+						<esri:LOD level="18" resolution="2.38865713397468" scale="9027.977411"/>
+						<esri:LOD level="19" resolution="1.19432856685505" scale="4513.988705"/>
+						<esri:LOD level="21" resolution="0.597164283559817" scale="2256.994353"/>
+						<esri:LOD level="23" resolution="0.298582141647617" scale="1128.497176"/>
+						<esri:LOD level="24" resolution="0.158750317500635" scale="600"/>
+						<esri:LOD level="25" resolution="0.0793751587503175" scale="300"/>
+					</esri:lods> 				
+	<!--				<esri:extent>                
+						<esri:Extent xmin="-13057667" ymin="3851383" xmax="-13023997" ymax="3872881">
+							<esri:SpatialReference wkid="102100"/> 
+						</esri:Extent>
+					</esri:extent> -->
+					<esri:ArcGISTiledMapServiceLayer id="ShadedRelief"   url="https://coemapservices.encinitasca.gov/hypegis/rest/services/Unsecured/Shaded_Relief_2009/MapServer" visible="true" alpha="0"/>
+					<esri:ArcGISTiledMapServiceLayer id="Imagery"   url="https://coemapservices.encinitasca.gov/hypegis/rest/services/Unsecured/Imagery_2009_Web/MapServer" visible="true" alpha="1"/>
+					<esri:ArcGISTiledMapServiceLayer id="Basemap" url="https://coemapservices.encinitasca.gov/hypegis/rest/services/Unsecured/Basemap/MapServer" visible="true"/>
+					<esri:ArcGISTiledMapServiceLayer id="BasemapPlus" url="https://coemapservices.encinitasca.gov/hypegis/rest/services/Unsecured/BasemapPlus/MapServer" visible="false"/>
+					<esri:GraphicsLayer id="graphicsLayer" graphicProvider="{queryParcels.executeLastResult.features}" visible="true"/>
+					<esri:FeatureLayer id="VGIpoints"
+									   mode="onDemand"
+									   outFields="*"
+									   url="https://hyperion.encinitasca.gov/hypegis/rest/services/Secured/Eng_Accidents/FeatureServer/0" 
+									   proxyURL="https://hyperion.encinitasca.gov/Proxy/Proxy.ashx"
+									   maxScale="21" /> 
+					<esri:GraphicsLayer id="glProfileLine" mouseEnabled="false" visible="true" >
+						<esri:symbol>
+							<esri:SimpleLineSymbol color="0xFF8800" width="{_configXML.profileLineWidth}"/>
+						</esri:symbol>
+					</esri:GraphicsLayer>
+				</esri:Map>
+			</mx:Canvas>
+	
+		</mx:HBox >
+		
+		<mx:HBox backgroundColor="0xffffff" backgroundAlpha=".7" width="100%" height="8%" horizontalScrollPolicy="off" verticalScrollPolicy="off" fontSize="10" id="hbTools">
+						
+			<mx:HBox borderColor="0xffffff" paddingLeft="7" paddingRight="7" paddingBottom="5" paddingTop="5" width="30%" height="100%" id="hbxAddress">
+				            
+							<mx:Label text="Find:" fontWeight="bold" fontSize="13" width="42">
+								
+							</mx:Label>
+				            <mx:TextInput id="txtFindSite" fontSize="12" fontStyle="italic" 
+				            	toolTip="Example:  505 S Vulcan Ave" text="type address or parcel number" 
+				            	width="216" click="ontxtBoxClick(event)"
+				            	enter="onNewSearch(event)"/>
+				            <mx:Button id="btnGo" fontSize="12"
+				                label="Go" 
+				                click="onNewSearch(event)"/>
+				            <mx:VBox height="100%" horizontalAlign="center" verticalGap="0">
+				            	            <mx:Label text="e.g: 505 S Vulcan Ave" textAlign="left" width="100%" fontSize="9"/>
+				            	            <mx:Label text="or"/>
+				            	            <mx:Label text="2580904300"/>
+				            </mx:VBox>
+			</mx:HBox>
+				
+	        <mx:HBox borderColor="0xffffff"  paddingLeft="5" paddingRight="5" paddingBottom="5" paddingTop="5" height="100%" width="70%" id="hbxTools">
+	    		
+	    		
+	    		<mx:ControlBar paddingTop="0" paddingBottom="0" horizontalAlign="center" click="controlbar1_clickHandler(event)">        
+	    			<mx:ToggleButtonBar id="tbb" 
+	    				creationComplete="tbb.selectedIndex = 2" 
+	    				valueCommit="if (tbb.selectedIndex == -1) { navToolbar.deactivate();  }"
+	    				itemClick="navitemClickHandler(event)"            
+	    				toggleOnClick="true"
+	    				buttonMode="true"
+	    				buttonHeight="32"
+	    				buttonWidth="32"
+	    				toolTipField="toolTip" >            
+	    				<mx:dataProvider>                
+	    			 		<fx:Object  data="Zoom In" icon="@Embed(source='assets/icons/i_zoomin.png')" toolTip="Click or drag on map to zoom in"/>
+	           				<fx:Object data="Zoom Out" icon="@Embed(source='assets/icons/i_zoomout.png')" toolTip="Click or drag on map to zoom out"/>
+	           				<fx:Object data="Identify" icon="@Embed(source='assets/icons/pan_identify.png')" toolTip="Click on a site to get info on it or drag on map to pan around"/>
+	    			 	</mx:dataProvider>        
+	    			 </mx:ToggleButtonBar>        
+	    			 <mx:ControlBar horizontalGap="0" paddingBottom="0" paddingTop="0" buttonMode="true">           
+	    			 	<mx:Button  icon="@Embed(source='assets/icons/i_zoomprevious.png')" 
+	    			 		click="navToolbar.zoomToPrevExtent()" 
+	    			 		enabled="{!navToolbar.isFirstExtent}"
+	    			 		toolTip="Zoom to the previous extent"
+	    			 		height="32" 
+	    			 		width="32"  />            
+	    			   	<mx:Button icon="@Embed(source='assets/icons/i_zoomnext.png')" 
+	    			   		click="navToolbar.zoomToNextExtent()" 
+	    			   		enabled="{!navToolbar.isLastExtent}"
+	    			   		toolTip="Zoom to the next extent"
+							height="32" 
+	    			   		width="32"/>        
+	    			 </mx:ControlBar>        
+	    			   	<mx:Button icon="@Embed(source='assets/icons/i_zoomfull.png')" 
+	    			   		click="map.zoomToInitialExtent()" 
+	    			   		toolTip="Zoom all the way out" 
+	    			   		height="32" 
+	    			   		width="32"/>    
+	    		</mx:ControlBar>
+	    		<mx:Label text="Zoom To:" fontSize="12" fontWeight="bold"/>
+	
+	    		<EncComponents:cboBookmarks id="cboBookmarks" change="onBookMarkChange(event)" toolTip="Select a location from the drop down to zoom to it" />
+	    		    		
+	    		<mx:Spacer width="100%"/>
+	    		<mx:Button label="Help" id="btnHelp" fontSize="12" toolTip="Help"  visible="false"/>
+			</mx:HBox>
+		</mx:HBox>
+
+	</s:VGroup>
+
+
+</s:Group>
